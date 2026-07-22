@@ -112,7 +112,12 @@ def resolve_catalog_source(
         return repository_root, (
             f"{MARKETPLACE_PATH}: {label}.source must be plugins/{plugin_name}"
         )
-    candidate = (repository_root / Path(*posix.parts)).resolve()
+    try:
+        candidate = (repository_root / Path(*posix.parts)).resolve()
+    except (OSError, RuntimeError):
+        return repository_root, (
+            f"{MARKETPLACE_PATH}: {label}.source cannot be resolved safely"
+        )
     try:
         candidate.relative_to(repository_root)
     except ValueError:
@@ -130,7 +135,13 @@ def resolve_hook(
     plugin: Plugin, relative: Path, *, required: bool
 ) -> tuple[Path | None, str | None]:
     """Resolve a fixed hook name and keep symlinks inside the owning payload."""
-    candidate = (plugin.root / relative).resolve()
+    try:
+        candidate = (plugin.root / relative).resolve()
+    except (OSError, RuntimeError):
+        return None, (
+            f"plugin {plugin.name}: hook {relative.as_posix()} "
+            "cannot be resolved safely"
+        )
     try:
         candidate.relative_to(plugin.root)
     except ValueError:
@@ -306,6 +317,25 @@ def make_directory_link(link: Path, target: Path) -> None:
         raise OSError(result.stderr or result.stdout or "could not create directory link")
 
 
+def make_loop_link(link: Path, *, target_is_directory: bool) -> None:
+    """Create a self-referential link for resolution-failure tests."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.symlink(link, link, target_is_directory=target_is_directory)
+        return
+    except OSError:
+        if os.name != "nt" or not target_is_directory:
+            raise
+    result = subprocess.run(
+        ["cmd", "/d", "/c", "mklink", "/J", str(link), str(link)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise OSError(result.stderr or result.stdout or "could not create loop link")
+
+
 def run_self_tests() -> int:
     """Verify discovery, confinement, ordering, optional hooks, and failures."""
     failures: list[str] = []
@@ -415,6 +445,18 @@ def run_self_tests() -> int:
             source_link_errors,
         )
 
+        make_loop_link(root / "plugins/loop-plugin", target_is_directory=True)
+        write_catalog(
+            root,
+            ({"name": "loop-plugin", "source": "./plugins/loop-plugin"},),
+        )
+        _, source_loop_errors = read_catalog_plugins(root)
+        check(
+            "source symlink loop",
+            any("plugins[0].source" in error for error in source_loop_errors),
+            source_loop_errors,
+        )
+
         outside_validation = workspace / "outside-validation"
         write_static_hook(outside_validation.parent / outside_validation.name)
         target_validation = outside_validation / "validation"
@@ -436,6 +478,33 @@ def run_self_tests() -> int:
         if (alpha / "validation").is_symlink():
             (alpha / "validation").unlink()
         elif (alpha / "validation").exists():
+            (alpha / "validation").rmdir()
+        write_static_hook(alpha)
+
+        for child in (alpha / "validation").iterdir():
+            child.unlink()
+        (alpha / "validation").rmdir()
+        make_loop_link(alpha / "validation", target_is_directory=True)
+        write_catalog(
+            root,
+            ({"name": "alpha-plugin", "source": "./plugins/alpha-plugin"},),
+        )
+        _, hook_loop_errors, _ = discover_hooks(root, "static", None)
+        check(
+            "hook symlink loop",
+            any(
+                "plugin alpha-plugin" in error
+                and (
+                    "cannot be resolved safely" in error
+                    or "required hook" in error
+                )
+                for error in hook_loop_errors
+            ),
+            hook_loop_errors,
+        )
+        if (alpha / "validation").is_symlink():
+            (alpha / "validation").unlink()
+        else:
             (alpha / "validation").rmdir()
         write_static_hook(alpha)
 

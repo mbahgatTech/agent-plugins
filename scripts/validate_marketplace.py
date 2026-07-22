@@ -103,7 +103,7 @@ class MarketplaceValidator:
     def _error(self, path: Path | str, message: str) -> None:
         try:
             display = Path(path).resolve().relative_to(self.root)
-        except (OSError, ValueError):
+        except (OSError, RuntimeError, ValueError):
             display = path
         self.errors.append(f"{display}: {message}")
 
@@ -243,7 +243,11 @@ class MarketplaceValidator:
             self._error(declaration_path, f"{field} must not contain '..' traversal")
             return None
 
-        candidate = (base / Path(*posix.parts)).resolve()
+        try:
+            candidate = (base / Path(*posix.parts)).resolve()
+        except (OSError, RuntimeError):
+            self._error(declaration_path, f"{field} cannot be resolved safely")
+            return None
         try:
             candidate.relative_to(boundary.resolve())
         except ValueError:
@@ -440,7 +444,7 @@ class MarketplaceValidator:
             if path.is_symlink():
                 try:
                     path.resolve(strict=True).relative_to(self.root)
-                except (FileNotFoundError, ValueError):
+                except (OSError, RuntimeError, ValueError):
                     self._error(path, "symlink escapes the repository or is broken")
                     continue
             try:
@@ -477,8 +481,12 @@ class MarketplaceValidator:
                 self._error(path, f"possible {label} material is present")
 
     def _validate_url(self, path: Path, value: str) -> None:
-        parsed = urlparse(value)
-        host = (parsed.hostname or "").casefold().rstrip(".")
+        try:
+            parsed = urlparse(value)
+            host = (parsed.hostname or "").casefold().rstrip(".")
+        except ValueError:
+            self._error(path, f"URL is malformed: {value}")
+            return
         if parsed.scheme != "https" or not host:
             self._error(path, f"URL must use public HTTPS: {value}")
             return
@@ -503,7 +511,7 @@ class MarketplaceValidator:
                 elif "." not in host:
                     self._error(path, f"URL host is not a public domain: {value}")
             else:
-                if not address.is_global:
+                if not address.is_global or address.is_multicast:
                     self._error(path, f"URL IP address is not public: {value}")
         decoded_path = parsed.path
         for _ in range(3):
@@ -655,6 +663,25 @@ def make_directory_link(link: Path, target: Path) -> None:
         raise OSError(result.stderr or result.stdout or "could not create directory link")
 
 
+def make_loop_link(link: Path, *, target_is_directory: bool) -> None:
+    """Create a self-referential link for resolution-failure tests."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.symlink(link, link, target_is_directory=target_is_directory)
+        return
+    except OSError:
+        if os.name != "nt" or not target_is_directory:
+            raise
+    result = subprocess.run(
+        ["cmd", "/d", "/c", "mklink", "/J", str(link), str(link)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise OSError(result.stderr or result.stdout or "could not create loop link")
+
+
 FixtureMutation = Callable[[Path, dict[str, Any]], None]
 
 
@@ -804,6 +831,21 @@ def run_self_tests() -> int:
         "resolves outside its allowed root",
         escaping_source,
         plugin_count=1,
+    )
+
+    def looping_source(root: Path, data: dict[str, Any]) -> None:
+        make_loop_link(root / "plugins/loop-plugin", target_is_directory=True)
+        data["plugins"].append(
+            {
+                **plugin_entry("loop-plugin", 3),
+                "source": "./plugins/loop-plugin",
+            }
+        )
+
+    expect_invalid(
+        "source symlink loop",
+        "plugins[0].source",
+        looping_source,
     )
 
     def drift_manifest(root: Path, _data: dict[str, Any]) -> None:
@@ -1093,6 +1135,21 @@ def run_self_tests() -> int:
         "encoded IP host URL",
         "URL host must not use percent encoding",
         lambda root, _data: add_text(root, "https://127%2e0.0.1/resource"),
+    )
+    expect_invalid(
+        "multicast IPv4 URL",
+        "URL IP address is not public",
+        lambda root, _data: add_text(root, "https://224.0.0.1/resource"),
+    )
+    expect_invalid(
+        "multicast IPv6 URL",
+        "URL IP address is not public",
+        lambda root, _data: add_text(root, "https://[ff02::1]/resource"),
+    )
+    expect_invalid(
+        "malformed URL",
+        "URL is malformed",
+        lambda root, _data: add_text(root, "https://["),
     )
     expect_invalid(
         "reserved suffix URL",
