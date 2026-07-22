@@ -133,17 +133,29 @@ jobs:
         shell: pwsh
         run: |
           $env:VIDEOPILOT_TEST_MISSING = "uv,uvx,ffmpeg,ffprobe"
-          & pwsh -NoProfile -File plugins/videopilot/skills/init/scripts/install-prereqs.ps1 -Install -DryRun
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $dryRun = Start-Process pwsh -NoNewWindow -Wait -PassThru -ArgumentList @(
+            "-NoProfile",
+            "-File", "plugins/videopilot/skills/init/scripts/install-prereqs.ps1",
+            "-Install",
+            "-DryRun"
+          )
+          if ($dryRun.ExitCode -ne 0) { exit 1 }
 
           $env:VIDEOPILOT_NONINTERACTIVE = "1"
-          & pwsh -NoProfile -File plugins/videopilot/skills/init/scripts/install-prereqs.ps1 -Install
-          if ($LASTEXITCODE -ne 2) { exit 1 }
+          $noninteractive = Start-Process pwsh -NoNewWindow -Wait -PassThru -ArgumentList @(
+            "-NoProfile",
+            "-File", "plugins/videopilot/skills/init/scripts/install-prereqs.ps1",
+            "-Install"
+          )
+          if ($noninteractive.ExitCode -ne 2) { exit 1 }
           Remove-Item Env:VIDEOPILOT_NONINTERACTIVE
 
           $env:VIDEOPILOT_TEST_PLATFORM = "linux"
-          & pwsh -NoProfile -File plugins/videopilot/skills/init/scripts/install-prereqs.ps1
-          if ($LASTEXITCODE -ne 3) { exit 1 }
+          $unsupported = Start-Process pwsh -NoNewWindow -Wait -PassThru -ArgumentList @(
+            "-NoProfile",
+            "-File", "plugins/videopilot/skills/init/scripts/install-prereqs.ps1"
+          )
+          if ($unsupported.ExitCode -ne 3) { exit 1 }
       - name: Prewarm pinned MCP server
         run: uvx --from videopilot==0.1.7 videopilot-mcp --version
       - name: Run VideoPilot doctor
