@@ -80,7 +80,7 @@ def read_catalog_plugins(root: Path) -> tuple[list[Plugin], list[str]]:
             continue
         seen.add(folded)
         plugin_root, source_error = resolve_catalog_source(
-            repository_root, entry.get("source"), label
+            repository_root, entry.get("source"), label, name
         )
         if source_error is not None:
             errors.append(source_error)
@@ -92,7 +92,7 @@ def read_catalog_plugins(root: Path) -> tuple[list[Plugin], list[str]]:
 
 
 def resolve_catalog_source(
-    repository_root: Path, value: object, label: str
+    repository_root: Path, value: object, label: str, plugin_name: str
 ) -> tuple[Path, str | None]:
     """Resolve one catalog source while rejecting absolute, traversal, and escaping paths."""
     if not isinstance(value, str) or not value.strip():
@@ -107,6 +107,10 @@ def resolve_catalog_source(
     if ".." in posix.parts:
         return repository_root, (
             f"{MARKETPLACE_PATH}: {label}.source must not contain '..' traversal"
+        )
+    if posix.parts != ("plugins", plugin_name):
+        return repository_root, (
+            f"{MARKETPLACE_PATH}: {label}.source must be plugins/{plugin_name}"
         )
     candidate = (repository_root / Path(*posix.parts)).resolve()
     try:
@@ -372,12 +376,37 @@ def run_self_tests() -> int:
             traversal_errors,
         )
 
-        outside_source = workspace / "outside-source"
-        outside_source.mkdir()
-        make_directory_link(root / "plugins/source-link", outside_source)
         write_catalog(
             root,
-            ({"name": "linked-plugin", "source": "./plugins/source-link"},),
+            ({"name": "root-plugin", "source": "."},),
+        )
+        _, root_source_errors = read_catalog_plugins(root)
+        check(
+            "repository root source",
+            any("must be plugins/root-plugin" in error for error in root_source_errors),
+            root_source_errors,
+        )
+
+        write_catalog(
+            root,
+            ({"name": "alpha-plugin", "source": "./plugins/beta-plugin"},),
+        )
+        _, mismatched_source_errors = read_catalog_plugins(root)
+        check(
+            "mismatched source name",
+            any(
+                "must be plugins/alpha-plugin" in error
+                for error in mismatched_source_errors
+            ),
+            mismatched_source_errors,
+        )
+
+        outside_source = workspace / "outside-source"
+        outside_source.mkdir()
+        make_directory_link(root / "plugins/linked-plugin", outside_source)
+        write_catalog(
+            root,
+            ({"name": "linked-plugin", "source": "./plugins/linked-plugin"},),
         )
         _, source_link_errors = read_catalog_plugins(root)
         check(

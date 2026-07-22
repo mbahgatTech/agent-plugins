@@ -160,6 +160,20 @@ class MarketplaceValidator:
                 expected="directory",
             )
             if source_root is not None:
+                expected_source = (
+                    isinstance(name, str)
+                    and PurePosixPath(
+                        str(plugin.get("source", "")).replace("\\", "/")
+                    ).parts
+                    == ("plugins", name)
+                    and source_root == (self.root / "plugins" / name).resolve()
+                )
+                if not expected_source:
+                    self._error(
+                        path,
+                        f"{label}.source must resolve to plugins/{name}",
+                    )
+                    continue
                 self._validate_plugin(path, plugin, source_root, label)
 
     def _validate_metadata(self, path: Path, value: Any) -> None:
@@ -468,6 +482,10 @@ class MarketplaceValidator:
         if parsed.scheme != "https" or not host:
             self._error(path, f"URL must use public HTTPS: {value}")
             return
+        decoded_host = unquote(host)
+        if decoded_host != host:
+            self._error(path, f"URL host must not use percent encoding: {value}")
+            host = decoded_host
         if parsed.username or parsed.password:
             self._error(path, f"credentials in URLs are prohibited: {value}")
         try:
@@ -759,6 +777,20 @@ def run_self_tests() -> int:
         "must not contain '..'",
         lambda _root, data: data["plugins"][0].update(source="../outside"),
         plugin_count=1,
+    )
+    expect_invalid(
+        "repository-root source",
+        "must resolve to plugins/example-plugin",
+        lambda _root, data: data["plugins"][0].update(source="."),
+        plugin_count=1,
+    )
+    expect_invalid(
+        "mismatched plugin source",
+        "must resolve to plugins/example-plugin",
+        lambda _root, data: data["plugins"][0].update(
+            source="./plugins/sample-plugin-2"
+        ),
+        plugin_count=2,
     )
 
     def escaping_source(root: Path, data: dict[str, Any]) -> None:
@@ -1056,6 +1088,11 @@ def run_self_tests() -> int:
         "shorthand IP URL",
         "numeric URL host is prohibited",
         lambda root, _data: add_text(root, "https://127.1/resource"),
+    )
+    expect_invalid(
+        "encoded IP host URL",
+        "URL host must not use percent encoding",
+        lambda root, _data: add_text(root, "https://127%2e0.0.1/resource"),
     )
     expect_invalid(
         "reserved suffix URL",

@@ -70,7 +70,7 @@ UNPINNED_EXECUTION_PATTERNS = (
         re.IGNORECASE,
     ),
 )
-TOOL_ROW_PATTERN = re.compile(r"(?m)^\| `([a-z_]+)` \|")
+TOOL_ROW_PATTERN = re.compile(r"(?m)^\| `([^`]+)` \|")
 
 
 class VideoPilotValidator:
@@ -224,19 +224,23 @@ class VideoPilotValidator:
             self._error(self.plugin_root, f"payload must reference {ENGINE_PIN}")
 
     def _validate_runtime_hooks(self) -> None:
-        required_commands = (
-            f"uvx --from {ENGINE_PIN} videopilot-mcp --version",
-            f"uvx --from {ENGINE_PIN} videopilot doctor",
-        )
-        for relative in (
-            "validation/ci-ubuntu.sh",
-            "validation/ci-windows.ps1",
-        ):
+        hook_commands = {
+            "validation/ci-ubuntu.sh": (
+                f"uvx --from {ENGINE_PIN} videopilot-mcp --version",
+                f"uvx --from {ENGINE_PIN} videopilot doctor",
+            ),
+            "validation/ci-windows.ps1": (
+                f"& uvx --from {ENGINE_PIN} videopilot-mcp --version",
+                f"& uvx --from {ENGINE_PIN} videopilot doctor",
+            ),
+        }
+        for relative, required_commands in hook_commands.items():
             text = self._read_text(relative)
             if text is None:
                 continue
+            executable_lines = {line.strip() for line in text.splitlines()}
             for command in required_commands:
-                if command not in text:
+                if command not in executable_lines:
                     self._error(
                         self.plugin_root / relative,
                         f"required runtime command is missing: {command!r}",
@@ -456,6 +460,16 @@ def run_self_tests(plugin_root: Path) -> int:
         ),
     )
     expect_invalid(
+        "extra tool drift",
+        "public tool table must list exactly",
+        lambda root: replace_text(
+            root,
+            "skills/create-video/SKILL.md",
+            "| `doctor` | none |\n",
+            "| `doctor` | none |\n| `rogue-tool` | none |\n",
+        ),
+    )
+    expect_invalid(
         "approval marker drift",
         "required safety marker is missing",
         lambda root: replace_text(
@@ -513,6 +527,33 @@ def run_self_tests(plugin_root: Path) -> int:
             "validation/ci-windows.ps1",
             ENGINE_PIN,
             "videopilot==9.9.9",
+        ),
+    )
+
+    def remove_exact_line(root: Path, relative: str, line: str) -> None:
+        path = root / relative
+        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+        filtered = [item for item in lines if item.strip() != line]
+        if len(filtered) == len(lines):
+            raise AssertionError(f"fixture line not found: {line}")
+        path.write_text("".join(filtered), encoding="utf-8")
+
+    expect_invalid(
+        "Ubuntu runtime invocation removed",
+        "required runtime command is missing",
+        lambda root: remove_exact_line(
+            root,
+            "validation/ci-ubuntu.sh",
+            f"uvx --from {ENGINE_PIN} videopilot-mcp --version",
+        ),
+    )
+    expect_invalid(
+        "Windows runtime invocation removed",
+        "required runtime command is missing",
+        lambda root: remove_exact_line(
+            root,
+            "validation/ci-windows.ps1",
+            f"& uvx --from {ENGINE_PIN} videopilot doctor",
         ),
     )
 
