@@ -44,3 +44,107 @@ jobs:
         run: python scripts/validate_marketplace.py
       - name: Run validator fixtures
         run: python scripts/validate_marketplace.py --self-test
+
+  videopilot-ubuntu:
+    name: videopilot-ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install media prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Check prerequisites without mutation
+        run: |
+          output="$(bash plugins/videopilot/skills/init/scripts/install-prereqs.sh)"
+          printf '%s\n' "$output"
+          ! grep -q '^Running:' <<<"$output"
+      - name: Exercise Unix setup modes
+        shell: bash
+        run: |
+          set +e
+          root_output="$(
+            VIDEOPILOT_TEST_MISSING=uv,uvx,ffmpeg,ffprobe \
+            VIDEOPILOT_TEST_OS=linux \
+            VIDEOPILOT_TEST_PACKAGE_MANAGER=apt-get \
+            VIDEOPILOT_TEST_EUID=0 \
+            bash plugins/videopilot/skills/init/scripts/install-prereqs.sh \
+              --install --dry-run
+          )"
+          root_code=$?
+          printf '%s\n' "$root_output"
+          test "$root_code" -eq 0
+          grep -q 'apt-get install -y ffmpeg curl' <<<"$root_output"
+          ! grep -q 'sudo apt-get' <<<"$root_output"
+
+          VIDEOPILOT_TEST_MISSING=uv,uvx,ffmpeg,ffprobe \
+          VIDEOPILOT_TEST_OS=linux \
+          VIDEOPILOT_TEST_PACKAGE_MANAGER=apt-get \
+          VIDEOPILOT_TEST_EUID=1000 \
+          VIDEOPILOT_TEST_NO_SUDO=1 \
+          bash plugins/videopilot/skills/init/scripts/install-prereqs.sh \
+            --install --dry-run
+          test "$?" -eq 4
+
+          VIDEOPILOT_TEST_MISSING=uv,uvx,ffmpeg,ffprobe \
+          VIDEOPILOT_TEST_OS=unsupported \
+          bash plugins/videopilot/skills/init/scripts/install-prereqs.sh
+          test "$?" -eq 3
+
+          VIDEOPILOT_TEST_MISSING=uv \
+          VIDEOPILOT_TEST_OS=linux \
+          VIDEOPILOT_TEST_PACKAGE_MANAGER=none \
+          VIDEOPILOT_NONINTERACTIVE=1 \
+          bash plugins/videopilot/skills/init/scripts/install-prereqs.sh --install
+          test "$?" -eq 2
+          set -e
+      - name: Prewarm pinned MCP server
+        run: uvx --from videopilot==0.1.7 videopilot-mcp --version
+      - name: Run VideoPilot doctor
+        run: uvx --from videopilot==0.1.7 videopilot doctor
+
+  videopilot-windows:
+    name: videopilot-windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install media prerequisites
+        shell: pwsh
+        run: choco install ffmpeg -y --no-progress
+      - name: Check prerequisites without mutation
+        shell: pwsh
+        run: |
+          $output = & pwsh -NoProfile -File plugins/videopilot/skills/init/scripts/install-prereqs.ps1
+          $output
+          if ($LASTEXITCODE -ne 0 -or $output -match "^Running:") {
+            exit 1
+          }
+      - name: Exercise Windows setup modes
+        shell: pwsh
+        run: |
+          $env:VIDEOPILOT_TEST_MISSING = "uv,uvx,ffmpeg,ffprobe"
+          & pwsh -NoProfile -File plugins/videopilot/skills/init/scripts/install-prereqs.ps1 -Install -DryRun
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          $env:VIDEOPILOT_NONINTERACTIVE = "1"
+          & pwsh -NoProfile -File plugins/videopilot/skills/init/scripts/install-prereqs.ps1 -Install
+          if ($LASTEXITCODE -ne 2) { exit 1 }
+          Remove-Item Env:VIDEOPILOT_NONINTERACTIVE
+
+          $env:VIDEOPILOT_TEST_PLATFORM = "linux"
+          & pwsh -NoProfile -File plugins/videopilot/skills/init/scripts/install-prereqs.ps1
+          if ($LASTEXITCODE -ne 3) { exit 1 }
+      - name: Prewarm pinned MCP server
+        run: uvx --from videopilot==0.1.7 videopilot-mcp --version
+      - name: Run VideoPilot doctor
+        run: uvx --from videopilot==0.1.7 videopilot doctor

@@ -1,0 +1,25 @@
+{
+  "name": "videopilot",
+  "version": "0.1.0",
+  "description": "Create and edit videos with the public VideoPilot engine.",
+  "author": {
+    "name": "Mazen Bahgat",
+    "email": "mazenbahgat@outlook.com"
+  },
+  "homepage": "https://github.com/mbahgatTech/videopilot",
+  "repository": "https://github.com/mbahgatTech/videopilot",
+  "license": "MIT",
+  "keywords": [
+    "video",
+    "voiceover",
+    "ffmpeg",
+    "mcp"
+  ],
+  "category": "media-tools",
+  "skills": [
+    "./skills/init",
+    "./skills/create-video",
+    "./skills/design-slide"
+  ],
+  "mcpServers": "./.mcp.json"
+}

@@ -48,6 +48,15 @@ CREDENTIAL_PATTERNS = {
         r"\s*=\s*[^\s#][^\r\n]*$"
     ),
 }
+UNPINNED_ENGINE_PATTERNS = {
+    "unpinned uvx engine execution": re.compile(
+        r"\buvx\s+--from\s+videopilot(?:\s|$)", re.IGNORECASE
+    ),
+    "unpinned pip engine installation": re.compile(
+        r"\b(?:python\s+-m\s+pip|pip|uv\s+pip)\s+install\s+videopilot(?:\s|$)",
+        re.IGNORECASE,
+    ),
+}
 EXPECTED_SKILLS = [
     "./skills/init",
     "./skills/create-video",
@@ -57,6 +66,14 @@ EXPECTED_MCP_ARGS = [
     "--from",
     "videopilot==0.1.7",
     "videopilot-mcp",
+]
+REQUIRED_PLUGIN_PATHS = [
+    "README.md",
+    "skills/init/SKILL.md",
+    "skills/init/scripts/install-prereqs.ps1",
+    "skills/init/scripts/install-prereqs.sh",
+    "skills/create-video/SKILL.md",
+    "skills/design-slide/SKILL.md",
 ]
 
 
@@ -181,7 +198,17 @@ class MarketplaceValidator:
         if not isinstance(manifest, dict):
             return
 
-        for field in ("name", "version", "description", "category"):
+        for field in (
+            "name",
+            "version",
+            "description",
+            "author",
+            "homepage",
+            "repository",
+            "license",
+            "keywords",
+            "category",
+        ):
             if entry.get(field) != manifest.get(field):
                 self._error(
                     catalog_path,
@@ -214,7 +241,35 @@ class MarketplaceValidator:
         if manifest.get("mcpServers") != "./.mcp.json":
             self._error(root_manifest, "mcpServers must be './.mcp.json'")
 
+        for relative in REQUIRED_PLUGIN_PATHS:
+            required_path = plugin_root / relative
+            if not required_path.is_file():
+                self._error(required_path, "required plugin file is missing")
+
+        for skill_path in EXPECTED_SKILLS:
+            skill_root = plugin_root / skill_path.removeprefix("./")
+            skill_file = skill_root / "SKILL.md"
+            if skill_file.is_file():
+                self._validate_skill(skill_file, skill_root.name)
+
         self._validate_mcp(plugin_root / ".mcp.json")
+
+    def _validate_skill(self, path: Path, expected_name: str) -> None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            self._error(path, "skill must be UTF-8 text")
+            return
+        frontmatter = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.DOTALL)
+        if frontmatter is None:
+            self._error(path, "skill must start with YAML frontmatter")
+            return
+        name = re.search(r"(?m)^name:\s*([a-z0-9-]+)\s*$", frontmatter.group(1))
+        description = re.search(r"(?m)^description:\s*(\S.*)$", frontmatter.group(1))
+        if name is None or name.group(1) != expected_name:
+            self._error(path, f"skill name must be {expected_name!r}")
+        if description is None:
+            self._error(path, "skill description must be nonempty")
 
     def _validate_mcp(self, path: Path) -> None:
         data = self._read_json(path)
@@ -267,6 +322,9 @@ class MarketplaceValidator:
         for label, pattern in CREDENTIAL_PATTERNS.items():
             if pattern.search(text):
                 self._error(path, f"possible {label} material is present")
+        for label, pattern in UNPINNED_ENGINE_PATTERNS.items():
+            if pattern.search(text):
+                self._error(path, f"{label} is present")
 
     def _validate_url(self, path: Path, value: str) -> None:
         parsed = urlparse(value)
@@ -335,6 +393,14 @@ def add_valid_plugin(root: Path, marketplace: dict[str, Any]) -> None:
         "source": "./plugins/videopilot",
         "description": description,
         "version": "0.1.0",
+        "author": {
+            "name": "Mazen Bahgat",
+            "email": "mazenbahgat@outlook.com",
+        },
+        "homepage": "https://github.com/mbahgatTech/videopilot",
+        "repository": "https://github.com/mbahgatTech/videopilot",
+        "license": "MIT",
+        "keywords": ["video", "voiceover", "ffmpeg", "mcp"],
         "category": "media-tools",
     }
     manifest = {
@@ -348,6 +414,7 @@ def add_valid_plugin(root: Path, marketplace: dict[str, Any]) -> None:
         "homepage": "https://github.com/mbahgatTech/videopilot",
         "repository": "https://github.com/mbahgatTech/videopilot",
         "license": "MIT",
+        "keywords": ["video", "voiceover", "ffmpeg", "mcp"],
         "category": "media-tools",
         "skills": EXPECTED_SKILLS,
         "mcpServers": "./.mcp.json",
@@ -373,6 +440,22 @@ def add_valid_plugin(root: Path, marketplace: dict[str, Any]) -> None:
             }
         },
     )
+    write_json(plugin_root / "README.md", {})
+    for skill in ("init", "create-video", "design-slide"):
+        path = plugin_root / "skills" / skill / "SKILL.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"---\nname: {skill}\ndescription: Fixture skill.\n---\n\n# {skill}\n",
+            encoding="utf-8",
+        )
+    scripts = plugin_root / "skills/init/scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    (scripts / "install-prereqs.ps1").write_text(
+        "Write-Output 'fixture'\n", encoding="utf-8"
+    )
+    (scripts / "install-prereqs.sh").write_text(
+        "#!/usr/bin/env bash\nprintf 'fixture\\n'\n", encoding="utf-8"
+    )
 
 
 def fixture_errors(
@@ -394,8 +477,11 @@ def fixture_errors(
 def run_self_tests() -> int:
     """Exercise positive and negative invariants without external test packages."""
     failures: list[str] = []
+    cases = 0
 
     def expect_valid(name: str, *, plugin: bool = False) -> None:
+        nonlocal cases
+        cases += 1
         errors = fixture_errors(plugin=plugin)
         if errors:
             failures.append(f"{name}: expected valid, got {errors}")
@@ -407,6 +493,8 @@ def run_self_tests() -> int:
         *,
         plugin: bool = False,
     ) -> None:
+        nonlocal cases
+        cases += 1
         errors = fixture_errors(mutate, plugin=plugin)
         if not any(needle in error for error in errors):
             failures.append(f"{name}: expected {needle!r}, got {errors}")
@@ -455,6 +543,16 @@ def run_self_tests() -> int:
         drift_manifest,
         plugin=True,
     )
+
+    def remove_manifest(root: Path, _data: dict[str, Any]) -> None:
+        (root / "plugins/videopilot/.claude-plugin/plugin.json").unlink()
+
+    expect_invalid(
+        "missing dual manifest",
+        "both plugin manifests are required",
+        remove_manifest,
+        plugin=True,
+    )
     expect_invalid(
         "metadata mismatch",
         "must match the plugin manifest",
@@ -476,6 +574,23 @@ def run_self_tests() -> int:
                         "type": "stdio",
                         "command": "uvx",
                         "args": ["--from", "videopilot", "videopilot-mcp"],
+                    }
+                }
+            },
+        ),
+        plugin=True,
+    )
+    expect_invalid(
+        "wrong MCP command",
+        "server command must be uvx",
+        lambda root, _data: replace_mcp(
+            root,
+            {
+                "mcpServers": {
+                    "videopilot": {
+                        "type": "stdio",
+                        "command": "python",
+                        "args": EXPECTED_MCP_ARGS,
                     }
                 }
             },
@@ -533,12 +648,20 @@ def run_self_tests() -> int:
         "not on the public allowlist",
         lambda root, _data: add_text(root, "https://internal.example.test/resource"),
     )
+    expect_invalid(
+        "unpinned execution",
+        "unpinned uvx engine execution",
+        lambda root, _data: add_text(
+            root,
+            "uvx --from videopilot videopilot-mcp",
+        ),
+    )
 
     if failures:
         for failure in failures:
             print(f"SELF-TEST FAIL: {failure}", file=sys.stderr)
         return 1
-    print("Validator self-tests passed: 15 cases")
+    print(f"Validator self-tests passed: {cases} cases")
     return 0
 
 

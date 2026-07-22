@@ -3,11 +3,32 @@
   "name": "mazen-plugins",
   "metadata": {
     "description": "Personal plugins maintained by Mazen Bahgat.",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "owner": {
     "name": "Mazen Bahgat",
     "email": "mazenbahgat@outlook.com"
   },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "videopilot",
+      "source": "./plugins/videopilot",
+      "description": "Create and edit videos with the public VideoPilot engine.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Mazen Bahgat",
+        "email": "mazenbahgat@outlook.com"
+      },
+      "homepage": "https://github.com/mbahgatTech/videopilot",
+      "repository": "https://github.com/mbahgatTech/videopilot",
+      "license": "MIT",
+      "keywords": [
+        "video",
+        "voiceover",
+        "ffmpeg",
+        "mcp"
+      ],
+      "category": "media-tools"
+    }
+  ]
 }
