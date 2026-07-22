@@ -1,0 +1,46 @@
+name: Validate marketplace
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-ubuntu:
+    name: static-ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Parse catalog
+        run: python -m json.tool .claude-plugin/marketplace.json
+      - name: Validate repository
+        run: python scripts/validate_marketplace.py
+      - name: Run validator fixtures
+        run: python scripts/validate_marketplace.py --self-test
+
+  static-windows:
+    name: static-windows
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Parse catalog
+        run: python -m json.tool .claude-plugin/marketplace.json
+      - name: Validate repository
+        run: python scripts/validate_marketplace.py
+      - name: Run validator fixtures
+        run: python scripts/validate_marketplace.py --self-test

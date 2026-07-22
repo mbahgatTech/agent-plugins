@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "mazen-plugins",
+  "metadata": {
+    "description": "Personal plugins maintained by Mazen Bahgat.",
+    "version": "0.1.0"
+  },
+  "owner": {
+    "name": "Mazen Bahgat",
+    "email": "mazenbahgat@outlook.com"
+  },
+  "plugins": []
+}
