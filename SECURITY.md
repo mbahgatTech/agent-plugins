@@ -16,9 +16,17 @@ Only public HTTPS documentation and source links are accepted. The validator
 rejects credential-shaped content, prohibited governance files, corporate
 contact domains, unapproved URL hosts, path traversal, and manifest drift.
 
-Plugin launchers must pin reviewed package versions. Credentials required by
-optional runtime integrations belong in the user's environment, never in
-this repository.
+Plugin launchers pin reviewed package versions. The VideoPilot plugin downloads
+only the public `videopilot==0.1.7` engine through `uvx`.
+
+Credentials required by optional runtime integrations belong in the user's
+environment, never in this repository, plugin files, logs, or generated
+projects. Azure Speech reads `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION`;
+publish only those variable names, never their values.
+
+Setup scripts are read-only unless install mode is explicitly selected. They
+must disclose every package-manager, network, and elevation effect and obtain
+confirmation before making changes.
 
 ## Supported versions
 
