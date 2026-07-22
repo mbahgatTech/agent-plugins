@@ -234,7 +234,9 @@ def run_phase(
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
-    environment = dict(os.environ if base_environment is None else base_environment)
+    environment = dict(os.environ)
+    if base_environment is not None:
+        environment.update(base_environment)
     environment[REPOSITORY_ROOT_ENV] = str(repository_root)
     failures = 0
     for hook in hooks:
